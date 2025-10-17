@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import '../services/tts_service.dart';
 import '../providers/navigation_provider.dart';
 import '../services/api_service.dart';
-import '../services/websocket_service.dart'; // ✅ Import
+import '../services/websocket_service.dart';
+import 'detection_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,9 +16,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late TTSService _tts;
-  late WebSocketService _ws; // ✅ WebSocket instance
+  late WebSocketService _navigationWS;
   bool _isProcessing = false;
-  bool _wsConnected = false; // ✅ Connection state tracker
+  bool _wsConnected = false;
+  final String _currentSessionId = '';
 
   @override
   void initState() {
@@ -25,43 +28,65 @@ class _HomeScreenState extends State<HomeScreen> {
       _tts = Provider.of<TTSService>(context, listen: false);
       await _tts.initialize();
 
-      // ✅ Initialize WebSocket
-      _ws = WebSocketService(Uri.parse('ws://10.0.11.239:8000/ws'));
+      // Initialize Navigation WebSocket (Port 8000)
+      _navigationWS = WebSocketService(Uri.parse('ws://10.0.11.239:8000/ws'));
 
-      _ws.onConnected = () {
-        debugPrint("✅ WS Connected");
-        _wsConnected = true;
-        _tts.speak("WebSocket connected successfully");
+      _navigationWS.onConnected = () {
+        debugPrint("✅ Navigation WS Connected");
+        setState(() => _wsConnected = true);
+        _tts.speak("Navigation service connected");
       };
 
-      _ws.onMessage = (msg) {
-        debugPrint("📩 WS Message: $msg");
-        // You can handle backend messages here (like detection results)
-        if (msg.toLowerCase().contains("alert")) {
-          _tts.speak("Alert from server: $msg");
+      _navigationWS.onMessage = (msg) {
+        debugPrint("📩 Navigation WS Message: $msg");
+        try {
+          final data = msg;
+          if (msg.contains('alert')) {
+            _tts.speak("Navigation alert received");
+          }
+        } catch (e) {
+          debugPrint("Message parse error: $e");
         }
       };
 
-      _ws.onDisconnected = () {
-        debugPrint("⚠️ WS Disconnected");
-        _wsConnected = false;
-        // don't reset UI automatically, just log
+      _navigationWS.onDisconnected = () {
+        debugPrint("⚠️ Navigation WS Disconnected");
+        setState(() => _wsConnected = false);
       };
 
-      _ws.onError = (err) {
-        debugPrint("❌ WS Error: $err");
-        _tts.speak("Error connecting to WebSocket");
+      _navigationWS.onError = (err) {
+        debugPrint("❌ Navigation WS Error: $err");
       };
 
-      _ws.connect();
+      _navigationWS.connect();
     });
   }
 
   @override
   void dispose() {
+    // Stop navigation if active
+    if (_wsConnected && _currentSessionId.isNotEmpty) {
+      _navigationWS.sendJson({'reason': 'app_closed'});
+    }
     _tts.dispose();
-    _ws.disconnect();
+    _navigationWS.disconnect();
     super.dispose();
+  }
+
+  Future<void> _requestCameraPermission() async {
+    final status = await Permission.camera.request();
+    if (status.isGranted) {
+      _navigateToDetection();
+    } else {
+      await _tts.speak("Camera permission is required for object detection");
+    }
+  }
+
+  void _navigateToDetection() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const DetectionScreen()),
+    );
   }
 
   Future<void> _handleTap(NavigationProvider provider) async {
@@ -71,7 +96,8 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       switch (provider.currentState) {
         case AppState.initial:
-          await _tts.speak("Welcome to Manas. Tap anywhere to continue.");
+          await _tts.speak(
+              "Welcome to Manas. Tap once for navigation, double tap for object detection.");
           await Future.delayed(const Duration(milliseconds: 3000));
           provider.startSession();
           await _tts.speak(
@@ -82,7 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
           await _tts.speak("Listening for your destination");
           await Future.delayed(const Duration(seconds: 2));
 
-          // Mock destination for now
+          // Mock destination (replace with real speech-to-text)
           String mockDestination = "VRSEC gate";
           provider.setDestination(mockDestination);
 
@@ -93,15 +119,13 @@ class _HomeScreenState extends State<HomeScreen> {
         case AppState.confirming:
           await _tts.speak("Getting directions. Please wait.");
 
-          // ✅ Send test message to backend
+          // Send confirmation via WebSocket
           if (_wsConnected) {
-            _ws.send("User confirmed navigation to ${provider.destination}");
-          } else {
-            debugPrint("⚠️ WS not connected, reconnecting...");
-            _ws.connect();
+            _navigationWS.sendJson(
+                {'destination': provider.destination, 'action': 'confirmed'});
           }
 
-          // Mock API call
+          // Get directions from REST API
           final response =
               await ApiService.getMockDirections(provider.destination);
           debugPrint("API Response: $response");
@@ -113,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
             break;
           }
 
-          // Extract directions
+          // Parse navigation instructions
           List<String> instructions = [];
           if (response['directions'] != null) {
             String directionsText = response['directions'].toString();
@@ -127,10 +151,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 .toList();
 
             for (var step in steps) {
-              if (!step.endsWith('.'))
+              if (!step.endsWith('.')) {
                 instructions.add('$step.');
-              else
+              } else {
                 instructions.add(step);
+              }
             }
 
             instructions.add("You have arrived at ${response['destination']}");
@@ -140,17 +165,45 @@ class _HomeScreenState extends State<HomeScreen> {
             break;
           }
 
+          // Start navigation via WebSocket
+          if (_wsConnected) {
+            _navigationWS.sendJson({
+              'destination': provider.destination,
+              'steps': instructions.length
+            });
+          }
+
           provider.confirmAndStart(instructions);
           await _tts.speak(provider.currentInstruction);
+
+          // Send initial progress
+          if (_wsConnected) {
+            _navigationWS.sendJson(
+                {'step': 0, 'instruction': provider.currentInstruction});
+          }
           break;
 
         case AppState.navigating:
           if (provider.hasMoreInstructions) {
             provider.nextInstruction();
             await _tts.speak(provider.currentInstruction);
+
+            // Send progress update via WebSocket
+            if (_wsConnected) {
+              _navigationWS.sendJson({
+                'step': provider.currentInstructionIndex,
+                'instruction': provider.currentInstruction
+              });
+            }
           } else {
             await _tts
                 .speak("Navigation complete. Tap to start a new journey.");
+
+            // Stop navigation via WebSocket
+            if (_wsConnected) {
+              _navigationWS.sendJson({'reason': 'completed'});
+            }
+
             provider.reset();
           }
           break;
@@ -164,16 +217,26 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isProcessing = false);
   }
 
+  Future<void> _handleDoubleTap() async {
+    await _tts.speak("Opening object detection mode");
+    await Future.delayed(const Duration(milliseconds: 500));
+    await _requestCameraPermission();
+  }
+
   String _getDisplayText(NavigationProvider provider) {
+    String connectionStatus = _wsConnected ? "🟢 Connected" : "🔴 Disconnected";
+
     switch (provider.currentState) {
       case AppState.initial:
-        return "TAP ANYWHERE\nTO START";
+        return "TAP ANYWHERE\nTO START\n\nDouble tap for detection\n\n$connectionStatus";
       case AppState.listening:
-        return "LISTENING...\nSpeak your destination";
+        return "LISTENING...\nSpeak your destination\n\n$connectionStatus";
       case AppState.confirming:
-        return "CONFIRM?\n${provider.destination}\n\nTap to confirm";
+        return "CONFIRM?\n${provider.destination}\n\nTap to confirm\n\n$connectionStatus";
       case AppState.navigating:
-        return "NAVIGATING\n\n${provider.currentInstruction}";
+        int progress = provider.currentInstructionIndex + 1;
+        int total = provider.instructions.length;
+        return "NAVIGATING ($progress/$total)\n\n${provider.currentInstruction}\n\n$connectionStatus";
     }
   }
 
@@ -209,6 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context, provider, child) {
         return GestureDetector(
           onTap: () => _handleTap(provider),
+          onDoubleTap: _handleDoubleTap,
           child: Scaffold(
             backgroundColor: _getBackgroundColor(provider),
             body: SizedBox(

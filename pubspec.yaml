@@ -10,7 +10,13 @@ dependencies:
   flutter:
     sdk: flutter
   
+  # Network
   http: ^1.2.2
+  web_socket_channel: ^3.0.3
+  
+  # Camera & Image Processing
+  camera: ^0.10.5+9
+  image: ^4.1.7
   
   # Text-to-Speech
   flutter_tts: ^4.0.2
@@ -20,7 +26,7 @@ dependencies:
   
   # State Management
   provider: ^6.1.1
-  web_socket_channel: ^3.0.3
+  
   # Permissions
   permission_handler: ^11.3.0
 
