@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/tts_service.dart';
 import '../providers/navigation_provider.dart';
+import 'package:services/api_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -119,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onTap: () => _handleTap(provider),
           child: Scaffold(
             backgroundColor: _getBackgroundColor(provider),
-            body: Container(
+            body: SizedBox(
               width: double.infinity,
               height: double.infinity,
               child: Center(
