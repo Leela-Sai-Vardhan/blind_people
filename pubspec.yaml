@@ -1,0 +1,31 @@
+name: manas
+description: Voice-guided navigation app for visually impaired users
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Text-to-Speech
+  flutter_tts: ^4.0.2
+  
+  # Speech-to-Text (for next phase)
+  speech_to_text: ^6.6.0
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # Permissions
+  permission_handler: ^11.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
