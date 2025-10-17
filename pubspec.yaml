@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  
   http: ^1.2.2
   
   # Text-to-Speech
@@ -19,8 +19,8 @@ dependencies:
   speech_to_text: ^6.6.0
   
   # State Management
-  provider: ^6.1.2
-  
+  provider: ^6.1.1
+  web_socket_channel: ^3.0.3
   # Permissions
   permission_handler: ^11.3.0
 

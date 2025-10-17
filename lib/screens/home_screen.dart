@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/tts_service.dart';
 import '../providers/navigation_provider.dart';
 import '../services/api_service.dart';
+import '../services/websocket_service.dart'; // ✅ Import
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,33 +14,65 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late TTSService _tts;
+  late WebSocketService _ws; // ✅ WebSocket instance
   bool _isProcessing = false;
+  bool _wsConnected = false; // ✅ Connection state tracker
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       _tts = Provider.of<TTSService>(context, listen: false);
-      _tts.initialize();
+      await _tts.initialize();
+
+      // ✅ Initialize WebSocket
+      _ws = WebSocketService(Uri.parse('ws://10.0.11.239:8000/ws'));
+
+      _ws.onConnected = () {
+        debugPrint("✅ WS Connected");
+        _wsConnected = true;
+        _tts.speak("WebSocket connected successfully");
+      };
+
+      _ws.onMessage = (msg) {
+        debugPrint("📩 WS Message: $msg");
+        // You can handle backend messages here (like detection results)
+        if (msg.toLowerCase().contains("alert")) {
+          _tts.speak("Alert from server: $msg");
+        }
+      };
+
+      _ws.onDisconnected = () {
+        debugPrint("⚠️ WS Disconnected");
+        _wsConnected = false;
+        // don't reset UI automatically, just log
+      };
+
+      _ws.onError = (err) {
+        debugPrint("❌ WS Error: $err");
+        _tts.speak("Error connecting to WebSocket");
+      };
+
+      _ws.connect();
     });
   }
 
   @override
   void dispose() {
     _tts.dispose();
+    _ws.disconnect();
     super.dispose();
   }
 
-  void _handleTap(NavigationProvider provider) async {
+  Future<void> _handleTap(NavigationProvider provider) async {
     if (_isProcessing) return;
-
     setState(() => _isProcessing = true);
 
     try {
       switch (provider.currentState) {
         case AppState.initial:
           await _tts.speak("Welcome to Manas. Tap anywhere to continue.");
-          await Future.delayed(const Duration(milliseconds: 3500));
+          await Future.delayed(const Duration(milliseconds: 3000));
           provider.startSession();
           await _tts.speak(
               "Where would you like to go? Please say your destination.");
@@ -49,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
           await _tts.speak("Listening for your destination");
           await Future.delayed(const Duration(seconds: 2));
 
-          // Mock destination (replace with real STT later)
+          // Mock destination for now
           String mockDestination = "VRSEC gate";
           provider.setDestination(mockDestination);
 
@@ -58,13 +91,20 @@ class _HomeScreenState extends State<HomeScreen> {
           break;
 
         case AppState.confirming:
-          // Call the backend API to get navigation instructions
           await _tts.speak("Getting directions. Please wait.");
 
+          // ✅ Send test message to backend
+          if (_wsConnected) {
+            _ws.send("User confirmed navigation to ${provider.destination}");
+          } else {
+            debugPrint("⚠️ WS not connected, reconnecting...");
+            _ws.connect();
+          }
+
+          // Mock API call
           final response =
               await ApiService.getMockDirections(provider.destination);
-
-          debugPrint("API Response: $response"); // Debug log
+          debugPrint("API Response: $response");
 
           if (response['status'] == 'error') {
             await _tts.speak(
@@ -73,44 +113,33 @@ class _HomeScreenState extends State<HomeScreen> {
             break;
           }
 
-          // Extract instructions from API response
+          // Extract directions
           List<String> instructions = [];
-
-          // The backend returns 'directions' as a string with steps separated by newlines
           if (response['directions'] != null) {
             String directionsText = response['directions'].toString();
-
-            // Add starting message
             instructions
                 .add("Starting navigation to ${response['destination']}");
 
-            // Split the directions by sentences or periods
             List<String> steps = directionsText
                 .split('. ')
                 .map((s) => s.trim())
                 .where((s) => s.isNotEmpty)
                 .toList();
 
-            // Add each step
             for (var step in steps) {
-              if (!step.endsWith('.')) {
-                instructions.add(step + '.');
-              } else {
+              if (!step.endsWith('.'))
+                instructions.add('$step.');
+              else
                 instructions.add(step);
-              }
             }
 
-            // Add arrival message
             instructions.add("You have arrived at ${response['destination']}");
           } else {
-            // Fallback if API format is different
-            await _tts.speak(
-                "Unable to parse navigation data. Response: ${response.toString()}");
+            await _tts.speak("Unable to parse navigation data.");
             provider.reset();
             break;
           }
 
-          debugPrint("Parsed instructions: $instructions"); // Debug log
           provider.confirmAndStart(instructions);
           await _tts.speak(provider.currentInstruction);
           break;
@@ -129,7 +158,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       await _tts.speak("An error occurred. Please try again.");
       provider.reset();
-      debugPrint("Error: $e");
+      debugPrint("❌ Error: $e");
     }
 
     setState(() => _isProcessing = false);
@@ -158,6 +187,19 @@ class _HomeScreenState extends State<HomeScreen> {
         return Colors.orange.shade900;
       case AppState.navigating:
         return Colors.green.shade900;
+    }
+  }
+
+  IconData _getIcon(AppState state) {
+    switch (state) {
+      case AppState.initial:
+        return Icons.touch_app;
+      case AppState.listening:
+        return Icons.mic;
+      case AppState.confirming:
+        return Icons.check_circle_outline;
+      case AppState.navigating:
+        return Icons.navigation;
     }
   }
 
@@ -209,18 +251,5 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-  }
-
-  IconData _getIcon(AppState state) {
-    switch (state) {
-      case AppState.initial:
-        return Icons.touch_app;
-      case AppState.listening:
-        return Icons.mic;
-      case AppState.confirming:
-        return Icons.check_circle_outline;
-      case AppState.navigating:
-        return Icons.navigation;
-    }
   }
 }
