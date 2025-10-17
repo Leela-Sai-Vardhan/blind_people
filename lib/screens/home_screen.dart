@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/tts_service.dart';
 import '../providers/navigation_provider.dart';
-import 'package:services/api_service.dart';
+import '../services/api_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -35,52 +35,101 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _isProcessing = true);
 
-    switch (provider.currentState) {
-      case AppState.initial:
-        await _tts.speak("Welcome to Manas. Tap anywhere to continue.");
-        await Future.delayed(const Duration(milliseconds: 3500));
-        provider.startSession();
-        await _tts
-            .speak("Where would you like to go? Please say your destination.");
-        break;
+    try {
+      switch (provider.currentState) {
+        case AppState.initial:
+          await _tts.speak("Welcome to Manas. Tap anywhere to continue.");
+          await Future.delayed(const Duration(milliseconds: 3500));
+          provider.startSession();
+          await _tts.speak(
+              "Where would you like to go? Please say your destination.");
+          break;
 
-      case AppState.listening:
-        // Simulate voice input for now (will be replaced with actual STT in next phase)
-        await _tts.speak("Listening for your destination");
-        await Future.delayed(const Duration(seconds: 2));
+        case AppState.listening:
+          await _tts.speak("Listening for your destination");
+          await Future.delayed(const Duration(seconds: 2));
 
-        // Mock destination (will be replaced with real speech-to-text)
-        String mockDestination = "City Library";
-        provider.setDestination(mockDestination);
+          // Mock destination (replace with real STT later)
+          String mockDestination = "VRSEC gate";
+          provider.setDestination(mockDestination);
 
-        await _tts.speak(
-            "You said $mockDestination. Tap to confirm, or double tap to cancel.");
-        break;
+          await _tts.speak(
+              "You said $mockDestination. Tap to confirm, or double tap to cancel.");
+          break;
 
-      case AppState.confirming:
-        // Mock navigation instructions (will be replaced with API call)
-        List<String> mockInstructions = [
-          "Starting navigation to ${provider.destination}",
-          "Head north on Main Street for 200 meters",
-          "Turn right onto Oak Avenue",
-          "Continue straight for 500 meters",
-          "Your destination is on the right",
-          "You have arrived at ${provider.destination}"
-        ];
+        case AppState.confirming:
+          // Call the backend API to get navigation instructions
+          await _tts.speak("Getting directions. Please wait.");
 
-        provider.confirmAndStart(mockInstructions);
-        await _tts.speak(provider.currentInstruction);
-        break;
+          final response =
+              await ApiService.getMockDirections(provider.destination);
 
-      case AppState.navigating:
-        if (provider.hasMoreInstructions) {
-          provider.nextInstruction();
+          debugPrint("API Response: $response"); // Debug log
+
+          if (response['status'] == 'error') {
+            await _tts.speak(
+                "Sorry, unable to get directions. ${response['message']}");
+            provider.reset();
+            break;
+          }
+
+          // Extract instructions from API response
+          List<String> instructions = [];
+
+          // The backend returns 'directions' as a string with steps separated by newlines
+          if (response['directions'] != null) {
+            String directionsText = response['directions'].toString();
+
+            // Add starting message
+            instructions
+                .add("Starting navigation to ${response['destination']}");
+
+            // Split the directions by sentences or periods
+            List<String> steps = directionsText
+                .split('. ')
+                .map((s) => s.trim())
+                .where((s) => s.isNotEmpty)
+                .toList();
+
+            // Add each step
+            for (var step in steps) {
+              if (!step.endsWith('.')) {
+                instructions.add(step + '.');
+              } else {
+                instructions.add(step);
+              }
+            }
+
+            // Add arrival message
+            instructions.add("You have arrived at ${response['destination']}");
+          } else {
+            // Fallback if API format is different
+            await _tts.speak(
+                "Unable to parse navigation data. Response: ${response.toString()}");
+            provider.reset();
+            break;
+          }
+
+          debugPrint("Parsed instructions: $instructions"); // Debug log
+          provider.confirmAndStart(instructions);
           await _tts.speak(provider.currentInstruction);
-        } else {
-          await _tts.speak("Navigation complete. Tap to start a new journey.");
-          provider.reset();
-        }
-        break;
+          break;
+
+        case AppState.navigating:
+          if (provider.hasMoreInstructions) {
+            provider.nextInstruction();
+            await _tts.speak(provider.currentInstruction);
+          } else {
+            await _tts
+                .speak("Navigation complete. Tap to start a new journey.");
+            provider.reset();
+          }
+          break;
+      }
+    } catch (e) {
+      await _tts.speak("An error occurred. Please try again.");
+      provider.reset();
+      debugPrint("Error: $e");
     }
 
     setState(() => _isProcessing = false);
