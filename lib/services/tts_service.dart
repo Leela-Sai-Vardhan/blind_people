@@ -8,29 +8,27 @@ class TTSService {
     if (_isInitialized) return;
 
     await _tts.setLanguage("en-US");
-    await _tts.setSpeechRate(0.5); // Slower for clarity
+    await _tts.setSpeechRate(0.5); // slower for clarity
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
 
-    // For Android
-    await _tts
-        .setVoice({"name": "en-us-x-sfg#male_1-local", "locale": "en-US"});
+    // Android-specific voice (safe fallback if unavailable)
+    try {
+      await _tts
+          .setVoice({"name": "en-us-x-sfg#male_1-local", "locale": "en-US"});
+    } catch (_) {}
 
     _isInitialized = true;
   }
 
   Future<void> speak(String text) async {
+    if (text.trim().isEmpty) return;
     await initialize();
+    await _tts.stop(); // avoid overlap
     await _tts.speak(text);
   }
 
-  Future<void> stop() async {
-    await _tts.stop();
-  }
-
-  Future<bool> get isSpeaking async {
-    return await _tts.speak("") == 1; // Workaround to check state
-  }
+  Future<void> stop() async => await _tts.stop();
 
   void dispose() {
     _tts.stop();

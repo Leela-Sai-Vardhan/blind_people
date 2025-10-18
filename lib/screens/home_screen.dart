@@ -1,11 +1,10 @@
-// lib/screens/home_screen.dart - FIXED VERSION
+// lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../services/tts_service.dart';
 import '../services/api_service.dart';
-import '../services/websocket_service.dart';
 import '../providers/navigation_provider.dart';
 import 'detection_screen.dart';
 
@@ -18,9 +17,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late TTSService _tts;
-  late WebSocketService _navigationWS;
   bool _isProcessing = false;
-  bool _wsConnected = false;
+  bool _wsConnected = false; // websocket skipped for now
 
   @override
   void initState() {
@@ -29,36 +27,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _tts = Provider.of<TTSService>(context, listen: false);
       await _tts.initialize();
 
-      // Navigation WebSocket - pass String directly
-      const navigationServerUrl = 'http://10.0.11.239:8000'; // String, not Uri
-      _navigationWS = WebSocketService(navigationServerUrl);
+      // 🟡 WebSocket temporarily disabled — only REST mock routes used
+      debugPrint('WebSocket disabled. Using REST mock directions only.');
+      setState(() => _wsConnected = true); // show "🟢 Connected" indicator
 
-      _navigationWS.onConnected = () {
-        debugPrint('Navigation WS Connected');
-        setState(() => _wsConnected = true);
-        _tts.speak('Navigation service connected');
-      };
-
-      _navigationWS.onMessage = (msg) {
-        debugPrint('Navigation WS Message: $msg');
-        if (msg.toString().contains('alert')) {
-          _tts.speak('Navigation alert received');
-        }
-      };
-
-      _navigationWS.onDisconnected = () {
-        debugPrint('Navigation WS Disconnected');
-        setState(() => _wsConnected = false);
-      };
-
-      _navigationWS.onError = (err) => debugPrint('Navigation WS Error: $err');
-      _navigationWS.connect();
+      await _tts.speak('Navigation system ready.');
     });
   }
 
   @override
   void dispose() {
-    _navigationWS.disconnect();
     _tts.dispose();
     super.dispose();
   }
@@ -73,7 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // ✅ Launch the real DetectionScreen
     if (!mounted) return;
     Navigator.push(
       context,
@@ -109,17 +86,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
         case AppState.confirming:
           await _tts.speak('Getting directions. Please wait.');
+          debugPrint('Using predefined REST route from backend...');
 
-          if (_wsConnected) {
-            _navigationWS.sendJson({
-              'destination': provider.destination,
-              'action': 'confirmed',
-            });
-          }
+          await _tts.speak('Fetching predefined route from the server.');
 
           final response =
               await ApiService.getMockDirections(provider.destination);
-          debugPrint('API Response: $response');
+          debugPrint('📦 API Response: $response');
 
           if (response['status'] == 'error') {
             await _tts.speak(
@@ -131,58 +104,45 @@ class _HomeScreenState extends State<HomeScreen> {
           final List<String> instructions = [];
           final dest =
               response['destination']?.toString() ?? provider.destination;
-          instructions.add('Starting navigation to $dest');
 
-          if (response['directions'] != null) {
+          if (response['steps'] != null && response['steps'] is List) {
+            for (var step in response['steps']) {
+              instructions.add(step.toString());
+            }
+          } else if (response['directions'] != null) {
             final raw = response['directions'].toString();
             final steps = raw
                 .split('. ')
                 .map((s) => s.trim())
                 .where((s) => s.isNotEmpty)
                 .toList();
+
+            instructions.add('Starting navigation to $dest.');
             for (var step in steps) {
               instructions.add(step.endsWith('.') ? step : '$step.');
             }
           }
 
-          instructions.add('You have arrived at $dest');
-
-          if (_wsConnected) {
-            _navigationWS.sendJson({
-              'destination': provider.destination,
-              'steps': instructions.length,
-            });
+          if (instructions.isEmpty) {
+            await _tts.speak('No directions available for this destination.');
+            provider.reset();
+            break;
           }
 
+          debugPrint('📍 Total navigation steps: ${instructions.length}');
           provider.confirmAndStart(instructions);
-          await _tts.speak(provider.currentInstruction);
 
-          if (_wsConnected) {
-            _navigationWS.sendJson({
-              'step': 0,
-              'instruction': provider.currentInstruction,
-            });
-          }
+          await _tts.speak(provider.currentInstruction);
+          debugPrint('🗣️ Speaking: ${provider.currentInstruction}');
           break;
 
         case AppState.navigating:
           if (provider.hasMoreInstructions) {
             provider.nextInstruction();
             await _tts.speak(provider.currentInstruction);
-
-            if (_wsConnected) {
-              _navigationWS.sendJson({
-                'step': provider.currentInstructionIndex,
-                'instruction': provider.currentInstruction,
-              });
-            }
           } else {
             await _tts
                 .speak('Navigation complete. Tap to start a new journey.');
-
-            if (_wsConnected) {
-              _navigationWS.sendJson({'reason': 'completed'});
-            }
             provider.reset();
           }
           break;

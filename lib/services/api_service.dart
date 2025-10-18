@@ -9,7 +9,7 @@ class ApiService {
   // - Windows/macOS desktop: use 127.0.0.1
 
   static const String baseUrl =
-      'http://10.0.10.210:5000'; // Default for Android
+      'http://10.0.11.239:5000'; // Default for Android
 
   /// Get navigation directions from the backend
   ///
