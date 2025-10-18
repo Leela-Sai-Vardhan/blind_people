@@ -1,3 +1,4 @@
+// lib/screens/home_screen.dart - FIXED VERSION
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -28,7 +29,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _tts = Provider.of<TTSService>(context, listen: false);
       await _tts.initialize();
 
-      _navigationWS = WebSocketService(Uri.parse('ws://10.0.11.239:8000/ws'));
+      // Navigation WebSocket - pass String directly
+      const navigationServerUrl = 'http://10.0.11.239:8000'; // String, not Uri
+      _navigationWS = WebSocketService(navigationServerUrl);
 
       _navigationWS.onConnected = () {
         debugPrint('Navigation WS Connected');
@@ -71,6 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     // ✅ Launch the real DetectionScreen
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const DetectionScreen()),
@@ -188,7 +192,9 @@ class _HomeScreenState extends State<HomeScreen> {
       await _tts.speak('An error occurred. Please try again.');
       provider.reset();
     } finally {
-      setState(() => _isProcessing = false);
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
     }
   }
 
