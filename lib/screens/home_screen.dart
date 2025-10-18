@@ -166,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case AppState.listening:
         return 'LISTENING...\nSpeak your destination\n\n$conn';
       case AppState.confirming:
-        return 'CONFIRM?\n${provider.destination}\n\nTap to confirm\n\n$conn';
+        return 'CONFIRM?\n${provider.destination}\n\nTap to confirm(Due to invalid console VRSEC gate is possible right now)\n\n$conn';
       case AppState.navigating:
         final progress = provider.currentInstructionIndex + 1;
         final total = provider.instructions.length;
